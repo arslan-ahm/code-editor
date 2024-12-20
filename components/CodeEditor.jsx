@@ -1,8 +1,8 @@
-"use client"
+"use client";
 import React from "react";
 import Editor from "@monaco-editor/react";
 
-const CodeEditor = ({ language, code, setCode }) => {
+const CodeEditor = ({ language, code, theme, setCode }) => {
   const getLanguageForEditor = (lang) => {
     if (lang === "html_css_js") return "html";
     return lang;
@@ -13,11 +13,9 @@ const CodeEditor = ({ language, code, setCode }) => {
       <Editor
         height="100%"
         language={getLanguageForEditor(language)}
-        value={language === "html_css_js" ? code.html : code.other}
-        theme="vs-dark"
-        onChange={(newValue) =>
-          setCode(language === "html_css_js" ? { html: newValue } : { other: newValue })
-        }
+        value={code}
+        theme={theme}
+        onChange={(newValue) => setCode(newValue || "")}
       />
     </div>
   );
