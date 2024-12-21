@@ -37,7 +37,8 @@ export default function Home() {
     </script>
   </body>
 </html>`,
-    javascript: "// Write your JavaScript below \nconsole.log('Hello, World!');",
+    javascript:
+      "// Write your JavaScript below \nconsole.log('Hello, World!');",
     python: "# Write your Python code here \nprint('Hello, World!')",
     cpp: '#include <iostream>\nusing namespace std;\n\nint main() {\n    cout << "Hello, World!" << endl;\n    return 0;\n}',
     java: 'public class Main {\n    public static void main(String[] args) {\n        System.out.println("Hello, World!");\n    }\n}',
@@ -46,72 +47,122 @@ export default function Home() {
 
   const runCode = async () => {
     try {
+      // For HTML, CSS, and JS execution
       if (language === "html_css_js") {
-        // Render live HTML, CSS, and JS
+        if (!code.trim()) {
+          throw new Error("Code is empty. Please write some HTML, CSS, or JS.");
+        }
+
         const blob = new Blob([code], { type: "text/html" });
         const url = URL.createObjectURL(blob);
 
         setOutput(<iframe src={url} className="w-full h-full"></iframe>);
-      } else {
-        // Run code for other languages using Judge0 API
-        const languageId = supportedLanguages.find(
-          (lang) => lang.value === language
-        )?.id;
-
-        if (!languageId) {
-          throw new Error("Invalid language selected.");
-        }
-
-        const response = await fetch(
-          "https://judge0-ce.p.rapidapi.com/submissions?base64_encoded=false",
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "X-RapidAPI-Host": "judge0-ce.p.rapidapi.com",
-              "X-RapidAPI-Key": process.env.NEXT_PUBLIC_RAPID_API_KEY,
-            },
-            body: JSON.stringify({
-              source_code: code,
-              language_id: languageId,
-              stdin: inputValue,
-            }),
-          }
-        );
-
-        if (!response.ok) {
-          throw new Error(`Error creating submission: ${response.status}`);
-        }
-
-        const { token } = await response.json();
-
-        if (!token) {
-          throw new Error("Failed to retrieve submission token.");
-        }
-
-        // Fetch execution result
-        const resultResponse = await fetch(
-          `https://judge0-ce.p.rapidapi.com/submissions/${token}?base64_encoded=false`,
-          {
-            method: "GET",
-            headers: {
-              "X-RapidAPI-Host": "judge0-ce.p.rapidapi.com",
-              "X-RapidAPI-Key": process.env.NEXT_PUBLIC_RAPID_API_KEY,
-            },
-          }
-        );
-
-        if (!resultResponse.ok) {
-          throw new Error(`Error fetching result: ${resultResponse.status}`);
-        }
-
-        const result = await resultResponse.json();
-        setOutput(result.stdout || result.stderr || "No output.");
+        return;
       }
+
+      // For other languages using Judge0 API
+      const languageId = supportedLanguages.find(
+        (lang) => lang.value === language
+      )?.id;
+
+      if (!languageId) {
+        throw new Error("Invalid language selected.");
+      }
+
+      if (!code.trim()) {
+        throw new Error(
+          "Code is empty. Please write some code before running."
+        );
+      }
+
+      // Make submission to Judge0
+      const submissionResponse = await makeJudge0Submission({
+        source_code: code,
+        language_id: languageId,
+        stdin: inputValue || "",
+      });
+
+      if (!submissionResponse.ok) {
+        const errorText = await submissionResponse.text();
+        throw new Error(
+          `Error creating submission: ${submissionResponse.status} - ${errorText}`
+        );
+      }
+
+      const { token } = await submissionResponse.json();
+      if (!token) {
+        throw new Error("Failed to retrieve submission token from Judge0 API.");
+      }
+
+      // Fetch execution result
+      const result = await fetchJudge0Result(token);
+      if (!result) {
+        throw new Error("Unable to fetch result. Please try again.");
+      }
+
+      // Display result
+      setOutput(result.stdout || result.stderr || "No output.");
     } catch (error) {
-      setOutput(`Error: ${error.message}`);
-      console.error(error);
+      handleError(error);
     }
+  };
+
+  const makeJudge0Submission = async ({ source_code, language_id, stdin }) => {
+    return fetch(
+      "https://judge0-ce.p.rapidapi.com/submissions?base64_encoded=false",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-RapidAPI-Host": "judge0-ce.p.rapidapi.com",
+          "X-RapidAPI-Key": process.env.NEXT_PUBLIC_RAPID_API_KEY,
+        },
+        body: JSON.stringify({ source_code, language_id, stdin }),
+      }
+    );
+  };
+
+  const fetchJudge0Result = async (token, retries = 5, delay = 2000) => {
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      const response = await fetch(
+        `https://judge0-ce.p.rapidapi.com/submissions/${token}?base64_encoded=false`,
+        {
+          method: "GET",
+          headers: {
+            "X-RapidAPI-Host": "judge0-ce.p.rapidapi.com",
+            "X-RapidAPI-Key": process.env.NEXT_PUBLIC_RAPID_API_KEY,
+          },
+        }
+      );
+
+      if (response.ok) {
+        return response.json();
+      }
+
+      // Wait and retry
+      if (attempt < retries) {
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      } else {
+        throw new Error(`Error fetching result after ${retries} retries.`);
+      }
+    }
+  };
+
+  const handleError = (error) => {
+    console.error("Execution Error:", error);
+
+    const errorMessage =
+      typeof error === "string"
+        ? error
+        : error.message || "An unexpected error occurred.";
+
+    setOutput(
+      <div className="p-4 bg-red-100 text-red-800 rounded">
+        <h3 className="font-bold text-lg">Execution Error</h3>
+        <p>{errorMessage}</p>
+        <p className="mt-2">Please check your code and try again.</p>
+      </div>
+    );
   };
 
   useEffect(() => {
@@ -125,8 +176,15 @@ export default function Home() {
       <div className="p-4 bg-gray-800 w-full flex justify-between items-center text-white">
         <h1 className="text-2xl font-bold">Customizable Code Editor</h1>
         <div className="flex items-center gap-4">
-          <span onClick={() => setTheme(theme === "vs-dark" ? "light" : "vs-dark")} className={`border border-slate-300 p-1 text-lg rounded-badge cursor-pointer`}>
-            {theme === "vs-dark" ?  <CiLight className="text-yellow-200" /> : <CiDark className="text-slate-50" />}
+          <span
+            onClick={() => setTheme(theme === "vs-dark" ? "light" : "vs-dark")}
+            className={`border border-slate-300 p-1 text-lg rounded-badge cursor-pointer`}
+          >
+            {theme === "vs-dark" ? (
+              <CiLight className="text-yellow-200" />
+            ) : (
+              <CiDark className="text-slate-50" />
+            )}
           </span>
           <button onClick={runCode} className="btn btn-success">
             Run Code
